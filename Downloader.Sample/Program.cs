@@ -4,6 +4,11 @@ const String url = "http://speedtest.newark.linode.com/100MB-newark.bin";
 const String path = "result.mp4";
 const String hash = "7b3d96bd611dd68a6d7e185dce41f46c8ec4b8e013dd27bb965931ffe917dfb2";
 
+if (File.Exists(path))
+{
+    File.Delete(path);
+}
+
 var downloader = new Downloader.Downloader(url, path, new Settings
 {
     ChunkCount = 8,
@@ -12,11 +17,6 @@ var downloader = new Downloader.Downloader(url, path, new Settings
     RetryCount = 5,
     Timeout = 5000
 });
-
-if (File.Exists(path))
-{
-    File.Delete(path);
-}
 
 downloader.OnProgress += chunks =>
 {

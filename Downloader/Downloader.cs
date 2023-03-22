@@ -143,6 +143,8 @@ public class Downloader : IDisposable
         {
             try
             {
+                // Unfortunately WhenAll blocks and waits for ALL tasks to complete.
+                // If a single chunk errors out, it will still wait for all the other chunks to complete.
                 await Task.WhenAll(tasks);
             }
             catch (Exception ex)
