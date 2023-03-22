@@ -1,4 +1,4 @@
-﻿using Downloader;
+﻿using DownloaderNET;
 
 const String url = "http://speedtest.newark.linode.com/100MB-newark.bin";
 const String path = "result.mp4";
@@ -9,7 +9,7 @@ if (File.Exists(path))
     File.Delete(path);
 }
 
-var downloader = new Downloader.Downloader(url, path, new Settings
+var downloader = new Downloader(url, path, new Settings
 {
     ChunkCount = 8,
     BufferSize = 4096,

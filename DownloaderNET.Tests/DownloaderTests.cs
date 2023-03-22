@@ -1,4 +1,4 @@
-namespace Downloader.Tests;
+namespace DownloaderNET.Tests;
 
 public class DownloaderTests : BaseTest
 {

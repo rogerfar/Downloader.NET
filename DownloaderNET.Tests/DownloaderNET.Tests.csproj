@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Downloader\Downloader.csproj" />
+    <ProjectReference Include="..\DownloaderNET\DownloaderNET.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,6 @@
 ﻿using System.Net.Http.Headers;
 
-namespace Downloader;
+namespace DownloaderNET;
 
 /**
  * The Downloader can download a file with multiple tasks, each writing to the disk directly.
@@ -207,11 +207,11 @@ public class Downloader : IDisposable
                 throw new Exception($"Failed to download bytes from range {startByte}-{endByte}. Status code: {response.StatusCode}");
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(_cancellationToken);
+            using var stream = await response.Content.ReadAsStreamAsync();
 
             // Construct a task for the stream timeout.
             var timeoutCompletionSource = new TaskCompletionSource<Boolean>();
-            await using var timer = new Timer(_ => timeoutCompletionSource.TrySetResult(true));
+            using var timer = new Timer(_ => timeoutCompletionSource.TrySetResult(true));
 
             // Move the cancellationToken into a task completion source so that we can always
             // cancel the task, even if the stream is hanging.
@@ -348,7 +348,7 @@ public class Downloader : IDisposable
 
         if (!responseHeaders.IsSuccessStatusCode)
         {
-            var content = await responseHeaders.Content.ReadAsStringAsync(_cancellationToken);
+            var content = await responseHeaders.Content.ReadAsStringAsync();
             throw new Exception($"Unable to retrieve content size before downloading, received response: {responseHeaders.StatusCode} {content}");
         }
 

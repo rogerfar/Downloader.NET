@@ -1,4 +1,4 @@
-﻿namespace Downloader;
+﻿namespace DownloaderNET;
 
 public static class Helpers
 {
