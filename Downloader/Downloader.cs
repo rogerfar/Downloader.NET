@@ -300,6 +300,15 @@ public class Downloader : IDisposable
 
             _chunks[thread].Completed = true;
         }
+        catch (IOException ex)
+        {
+            // In rare occassions webservers don't report the content length the same as the range length.
+            // The only thing we can do is ignore this error.
+            if (!ex.Message.StartsWith("The response ended prematurely"))
+            {
+                throw;
+            }
+        }
         catch (Exception)
         {
             // When an exception occurs make sure to rethrow when the cancellationtoken is cancelled, and don't retry.
