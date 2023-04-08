@@ -13,18 +13,19 @@ var downloader = new Downloader(url, path, new Settings
 {
     ChunkCount = 8,
     BufferSize = 4096,
-    MaximumBytesPerSecond = 1024 * 1024 * 10,
+    MaximumBytesPerSecond = 1024 * 1024 * 30,
     RetryCount = 5,
-    Timeout = 5000
+    Timeout = 5000,
+    UpdateTime = 10
 });
 
 downloader.OnProgress += chunks =>
 {
     Console.SetCursorPosition(0, 0);
 
-    for (var i = 0; i < chunks.Count; i++)
+    for (var i = 0; i < chunks.Count + 1; i++)
     {
-        Console.WriteLine("                             ");
+        Console.WriteLine("                                               ");
     }
 
     Console.SetCursorPosition(0, 0);
@@ -42,6 +43,8 @@ downloader.OnProgress += chunks =>
             Console.WriteLine($"Thread {i} @ {chunk.Speed.ToMemoryMensurableUnit()}/s ({chunk.Progress:N2}%)");
         }
     }
+
+    Console.WriteLine($"Avg {chunks.Sum(m => m.Speed).ToMemoryMensurableUnit()}/s ({Math.Round(chunks.Sum(m => m.Progress) / chunks.Count)}%)");
 };
 
 downloader.OnComplete += async ex =>

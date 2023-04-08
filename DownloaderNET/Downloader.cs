@@ -75,7 +75,7 @@ public class Downloader : IDisposable
             settings.RetryCount = 0;
         }
 
-        if (settings.UpdateTime < 0)
+        if (settings.UpdateTime <= 0)
         {
             settings.UpdateTime = 1000;
         }
