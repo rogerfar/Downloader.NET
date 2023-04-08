@@ -1,4 +1,6 @@
-﻿using System.Net.Http.Headers;
+﻿using System;
+using System.Net.Http.Headers;
+using System.Runtime;
 
 namespace DownloaderNET;
 
@@ -22,11 +24,12 @@ public class Downloader : IDisposable
 
     private readonly Uri _uri;
     private readonly Settings _settings;
-    private readonly CancellationToken _cancellationToken;
     private readonly FileStream _fileStream;
     private readonly SemaphoreSlim _fileSemaphore;
 
     private readonly IList<ChunkProgress> _chunks = new List<ChunkProgress>();
+
+    private CancellationToken _cancellationToken;
     
     /// <summary>
     /// Construct the Downloader.
@@ -45,7 +48,8 @@ public class Downloader : IDisposable
             ChunkCount = 1,
             MaximumBytesPerSecond = 0,
             Timeout = 30000,
-            RetryCount = 0
+            RetryCount = 0,
+            UpdateTime = 1000
         };
 
         if (settings.BufferSize <= 0)
@@ -71,6 +75,11 @@ public class Downloader : IDisposable
         if (settings.RetryCount < 0)
         {
             settings.RetryCount = 0;
+        }
+
+        if (settings.UpdateTime < 0)
+        {
+            settings.UpdateTime = 1000;
         }
 
         _settings = settings;
@@ -168,7 +177,7 @@ public class Downloader : IDisposable
                 OnProgress?.Invoke(_chunks);
 
                 // ReSharper disable once MethodSupportsCancellation
-                await Task.Delay(100);
+                await Task.Delay(_settings.UpdateTime);
             }
 
             OnProgress?.Invoke(_chunks);
@@ -220,7 +229,7 @@ public class Downloader : IDisposable
 
             var buffer = new Byte[_settings.BufferSize];
 
-            var totalBytesRead = 0;
+            var totalBytesRead = 0L;
 
             var position = startByte;
 

@@ -14,7 +14,7 @@
     <RepositoryUrl>https://github.com/rogerfar/Downloader.NET</RepositoryUrl>
     <RepositoryType>GitHub</RepositoryType>
     <PackageTags>Downloader</PackageTags>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <LangVersion>latest</LangVersion>

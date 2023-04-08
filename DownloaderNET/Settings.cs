@@ -31,4 +31,10 @@ public class Settings
      * Default = 30000
      */
     public Int32 Timeout { get; set; }
+
+    /**
+     * Time in ms when the onProgress event fires in ms. Lower numbers increase CPU consumption.
+     * Default = 1000
+     */
+    public Int32 UpdateTime { get; set; }
 }
