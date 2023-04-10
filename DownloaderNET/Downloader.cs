@@ -12,7 +12,7 @@ public class Downloader : IDisposable
     /**
      * The OnProgress event will periodically be fired with the current state.
      */
-    public Action<IList<ChunkProgress>>? OnProgress { get; set; }
+    public Action<IList<ChunkDownloadProgress>>? OnProgress { get; set; }
 
     /**
      * The OnComplete will fire when all chunks are finished and the file has been written to disk completely.
@@ -25,7 +25,7 @@ public class Downloader : IDisposable
     private readonly FileStream _fileStream;
     private readonly SemaphoreSlim _fileSemaphore;
 
-    private readonly IList<ChunkProgress> _chunks = new List<ChunkProgress>();
+    private readonly IList<ChunkDownloadProgress> _chunks = new List<ChunkDownloadProgress>();
 
     private CancellationToken _cancellationToken;
     
@@ -107,7 +107,7 @@ public class Downloader : IDisposable
         {
             _settings.ChunkCount = 1;
         }
-        
+
         var tasks = new List<Task>();
 
         // Determine the size of each chunk based on the given chunk count.
@@ -120,17 +120,14 @@ public class Downloader : IDisposable
             _settings.ChunkCount--;
             chunkSize = contentSize / _settings.ChunkCount;
         }
-
-        // Divide the max speed by the chunk count so that all chunks together download with the target speed.
-        _settings.MaximumBytesPerSecond /= _settings.ChunkCount;
-
+        
         for (var i = 0; i < _settings.ChunkCount; i++)
         {
             // Calcuate the position of each chunk it needs to download, make sure the last chunk downloads the remainder.
             var startByte = i * (contentSize / _settings.ChunkCount);
             var endByte = i == _settings.ChunkCount - 1 ? contentSize : startByte + chunkSize;
 
-            _chunks.Add(new ChunkProgress
+            _chunks.Add(new ChunkDownloadProgress
             {
                 StartByte = startByte,
                 EndByte = endByte,
@@ -201,7 +198,7 @@ public class Downloader : IDisposable
             // The timeout is used in both doing the initial request and for timing out the stream.
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromMilliseconds(_settings.Timeout);
-
+            
             // Use the Range parameter to get only a part of the download.
             var request = new HttpRequestMessage(HttpMethod.Get, _uri);
             request.Headers.Range = new RangeHeaderValue(startByte, endByte);
@@ -215,7 +212,7 @@ public class Downloader : IDisposable
             }
 
             using var stream = await response.Content.ReadAsStreamAsync();
-
+            
             // Construct a task for the stream timeout.
             var timeoutCompletionSource = new TaskCompletionSource<Boolean>();
             using var timer = new Timer(_ => timeoutCompletionSource.TrySetResult(true));
@@ -225,15 +222,13 @@ public class Downloader : IDisposable
             var cancellationCompletionSource = new TaskCompletionSource<Boolean>();
             _cancellationToken.Register(() => cancellationCompletionSource.TrySetResult(true));
 
+            var bandwidth = new Bandwidth(_settings.MaximumBytesPerSecond / _settings.ChunkCount);
+
             var buffer = new Byte[_settings.BufferSize];
 
             var totalBytesRead = 0L;
 
             var position = startByte;
-
-            // Use a time variable to keep track of how much time has passed since start downloading.
-            // This is used for speed calculations.
-            var startTime = DateTime.UtcNow;
 
             // Start the timeout timer.
             timer.Change(TimeSpan.FromMilliseconds(_settings.Timeout), Timeout.InfiniteTimeSpan);
@@ -265,14 +260,13 @@ public class Downloader : IDisposable
                 // Update statistics and calcuate current speed.
                 totalBytesRead += bytesRead;
 
-                var elapsedTime = DateTime.UtcNow - startTime;
-                var downloadSpeed = totalBytesRead / elapsedTime.TotalSeconds;
-                _chunks[thread].Speed = downloadSpeed;
-                _chunks[thread].DownloadBytes = totalBytesRead;
+                bandwidth.CalculateSpeed(bytesRead);
 
-                if (_chunks[thread].LengthBytes > 0)
+                var delayTime = bandwidth.PopSpeedRetrieveTime();
+                if (delayTime > 0)
                 {
-                    _chunks[thread].Progress = ((Double)totalBytesRead / (Double)_chunks[thread].LengthBytes) * 100;
+                    // ReSharper disable once MethodSupportsCancellation
+                    await Task.Delay(delayTime);
                 }
 
                 // Write the result of the buffer to the disk by setting the lock so no other
@@ -282,6 +276,14 @@ public class Downloader : IDisposable
 
                 try
                 {
+                    _chunks[thread].Speed = bandwidth.Speed;
+                    _chunks[thread].DownloadBytes = totalBytesRead;
+
+                    if (_chunks[thread].LengthBytes > 0)
+                    {
+                        _chunks[thread].Progress = ((Double)totalBytesRead / (Double)_chunks[thread].LengthBytes) * 100;
+                    }
+
                     _fileStream.Seek(position, SeekOrigin.Begin);
 
                     // ReSharper disable once MethodSupportsCancellation
@@ -293,16 +295,6 @@ public class Downloader : IDisposable
                     _fileSemaphore.Release();
                 }
 
-                // If the speed limiter is set and we are over the download speeed, calculate how much 
-                // of a time delay we need to introduce to rate limit the reading of the stream.
-                if (_settings.MaximumBytesPerSecond > 0 && downloadSpeed > _settings.MaximumBytesPerSecond)
-                {
-                    var delay = TimeSpan.FromSeconds(bytesRead / (Double)_settings.MaximumBytesPerSecond);
-
-                    // ReSharper disable once MethodSupportsCancellation
-                    await Task.Delay(delay);
-                }
-                
                 // Reset the stream timeout timer.
                 timer.Change(TimeSpan.FromMilliseconds(_settings.Timeout), Timeout.InfiniteTimeSpan);
             }

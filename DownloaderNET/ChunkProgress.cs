@@ -1,6 +1,6 @@
 ﻿namespace DownloaderNET;
 
-public class ChunkProgress
+public class ChunkDownloadProgress
 {
     public Int64 StartByte { get; set; }
     public Int64 EndByte { get; set; }
