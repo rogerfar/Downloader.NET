@@ -24,11 +24,12 @@ public class Downloader : IDisposable
     private readonly Settings _settings;
     private readonly FileStream _fileStream;
     private readonly SemaphoreSlim _fileSemaphore;
+    private readonly HttpClient _httpClient;
 
     private readonly IList<ChunkDownloadProgress> _chunks = new List<ChunkDownloadProgress>();
 
     private CancellationToken _cancellationToken;
-    
+
     /// <summary>
     /// Construct the Downloader.
     /// </summary>
@@ -88,6 +89,10 @@ public class Downloader : IDisposable
         // as we are using Seek to seek through the stream.
         _fileStream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, _settings.BufferSize, true);
         _fileSemaphore = new SemaphoreSlim(1);
+
+        // The timeout is used in both doing the initial request and for timing out the stream.
+        _httpClient = new HttpClient();
+        _httpClient.Timeout = TimeSpan.FromMilliseconds(_settings.Timeout);
     }
 
     /// <summary>
@@ -159,6 +164,7 @@ public class Downloader : IDisposable
             {
                 _fileStream.Close();
                 completed = true;
+                _httpClient.Dispose();
             }
         });
 
@@ -195,16 +201,12 @@ public class Downloader : IDisposable
     {
         try
         {
-            // The timeout is used in both doing the initial request and for timing out the stream.
-            using var httpClient = new HttpClient();
-            httpClient.Timeout = TimeSpan.FromMilliseconds(_settings.Timeout);
-            
             // Use the Range parameter to get only a part of the download.
             var request = new HttpRequestMessage(HttpMethod.Get, _uri);
             request.Headers.Range = new RangeHeaderValue(startByte, endByte);
 
             // Using ResponseHeadersRead gives more control of the result stream.
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, _cancellationToken);
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, _cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -322,6 +324,16 @@ public class Downloader : IDisposable
             if (attempt < _settings.RetryCount)
             {
                 attempt += 1;
+
+                if (attempt > 5)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), _cancellationToken);
+                }
+                else
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(attempt), _cancellationToken);
+                }
+
                 await Download(thread, startByte, endByte, attempt);
             }
             else
@@ -338,12 +350,7 @@ public class Downloader : IDisposable
     /// <exception cref="Exception"></exception>
     private async Task<Int64> GetContentSize()
     {
-        var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(_settings.Timeout)
-        };
-
-        var responseHeaders = await httpClient.SendAsync(new HttpRequestMessage(HttpMethod.Head, _uri), _cancellationToken);
+        var responseHeaders = await _httpClient.SendAsync(new HttpRequestMessage(HttpMethod.Head, _uri), _cancellationToken);
 
         if (!responseHeaders.IsSuccessStatusCode)
         {
