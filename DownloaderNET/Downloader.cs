@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Buffers;
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 
 namespace DownloaderNET;
@@ -13,13 +14,13 @@ public class Downloader : IDisposable
     /**
      * The OnProgress event will periodically be fired with the current state.
      */
-    public Action<IList<ChunkDownloadProgress>>? OnProgress { get; set; }
+    public Action<IList<Chunk>>? OnProgress { get; set; }
 
     /**
      * The OnComplete will fire when all chunks are finished and the file has been written to disk completely.
      * The Exception parameter will be passed if an exception occurred during downloading.
      */
-    public Func<Exception?, Task>? OnComplete { get; set; }
+    public Func<Int64, Exception?, Task>? OnComplete { get; set; }
 
     /**
      * Log debug messages.
@@ -27,14 +28,11 @@ public class Downloader : IDisposable
     public Action<LogMessage>? OnLog { get; set; }
 
     private readonly Uri _uri;
+    private readonly String _path;
     private readonly Settings _settings;
-    private readonly FileStream _fileStream;
-    private readonly SemaphoreSlim _fileSemaphore;
+    private readonly ConcurrentQueue<FileChunk> _fileBuffer;
     private readonly HttpClient _httpClient;
-
-    private readonly IList<ChunkDownloadProgress> _chunks = new List<ChunkDownloadProgress>();
-
-    private CancellationToken _cancellationToken;
+    private readonly ArrayPool<Byte> _bufferPool = ArrayPool<Byte>.Shared;
 
     /// <summary>
     /// Construct the Downloader.
@@ -42,21 +40,20 @@ public class Downloader : IDisposable
     /// <param name="url">The URL to download the file from.</param>
     /// <param name="path">The complete path (directory + filename) to write the file to.</param>
     /// <param name="settings">Pass additional _settings to the downloader.</param>
-    /// <param name="cancellationToken">The cancellationtoken lets you cancel the download completely.</param>
-    public Downloader(String url, String path, Settings? settings = null, CancellationToken cancellationToken = default)
+    public Downloader(String url, String path, Settings? settings = null)
     {
         Log("Constructor start", -1);
-
-        ServicePointManager.DefaultConnectionLimit = 100;
 
         Log($"Setting URL {url}", -1);
 
         _uri = new Uri(url);
+        _path = path;
 
         settings ??= new Settings
         {
             BufferSize = 4096,
-            ChunkCount = 1,
+            Parallel = 8,
+            ChunkSize = 0,
             MaximumBytesPerSecond = 0,
             Timeout = 30000,
             RetryCount = 0,
@@ -68,9 +65,14 @@ public class Downloader : IDisposable
             settings.BufferSize = 4096;
         }
 
-        if (settings.ChunkCount <= 0)
+        if (settings.Parallel <= 0)
         {
-            settings.ChunkCount = 1;
+            settings.Parallel = 1;
+        }
+
+        if (settings.ChunkSize <= 0)
+        {
+            settings.ChunkSize = 0;
         }
 
         if (settings.MaximumBytesPerSecond < 0)
@@ -94,27 +96,26 @@ public class Downloader : IDisposable
         }
 
         Log($"Setting BufferSize {settings.BufferSize}", -1);
-        Log($"Setting ChunkCount {settings.ChunkCount}", -1);
+        Log($"Setting ChunkCount {settings.Parallel}", -1);
+        Log($"Setting ChunkSize {settings.ChunkSize}", -1);
         Log($"Setting MaximumBytesPerSecond {settings.MaximumBytesPerSecond}", -1);
         Log($"Setting Timeout {settings.Timeout}", -1);
         Log($"Setting RetryCount {settings.RetryCount}", -1);
         Log($"Setting UpdateTime {settings.UpdateTime}", -1);
 
         _settings = settings;
-        _cancellationToken = cancellationToken;
-
+        
         Log($"Creating filestream", -1);
 
-        // Open a filestream that allows multiple tasks writing to the stream simultaniously.
-        // Use the semaphore to make sure only 1 task can write to the file at the same time
-        // as we are using Seek to seek through the stream.
-        _fileStream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, _settings.BufferSize, true);
-        _fileSemaphore = new SemaphoreSlim(1);
+        _fileBuffer = new ConcurrentQueue<FileChunk>();
 
         Log($"Creating httpClient", -1);
 
         // The timeout is used in both doing the initial request and for timing out the stream.
-        _httpClient = new HttpClient();
+        _httpClient = new HttpClient(new HttpClientHandler
+        {
+            MaxConnectionsPerServer = _settings.Parallel * 2
+        });
         _httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(30000, settings.Timeout));
         
         Log($"Constructor done", -1);
@@ -123,83 +124,137 @@ public class Downloader : IDisposable
     /// <summary>
     /// Download a file with the given url to the given path parameter.
     /// </summary>
+    /// <param name="cancellationToken">The cancellationtoken lets you cancel the download completely.</param>
     /// <exception cref="OperationCanceledException">Occurs when the cancellation token is cancelled.</exception>
     /// <exception cref="TaskCanceledException">Occurs when the download cannot be started and is timed out.</exception>
     /// <exception cref="TimeoutException">Occurs when the download times out while downloading.</exception>
-    public async Task Download()
+    public async Task Download(CancellationToken cancellationToken = default)
     {
         Log($"Download start", -1);
 
         // Fetch the content size from the URL, if the content size cannot be fetched,
         // we can only download with a single chunk.
-        var contentSize = await GetContentSize();
+        var contentSize = await GetContentSize(cancellationToken);
+
+        if (_settings.ChunkSize == 0)
+        {
+            if (contentSize <= 1024 * 1024 * 10)
+            {
+                _settings.ChunkSize = 1024 * 1024 * 10;
+            }
+            else if (contentSize <= 1024 * 1024 * 100)
+            {
+                _settings.ChunkSize = 1024 * 1024 * 25;
+            }
+            else
+            {
+                _settings.ChunkSize = 1024 * 1024 * 50;
+            }
+
+            Log($"Setting chunk size to {_settings.ChunkSize}", -1);
+        }
+
+        if (_settings.ChunkSize < _settings.BufferSize)
+        {
+            _settings.ChunkSize = _settings.BufferSize;
+        }
 
         if (contentSize == -1)
         {
-            Log($"Force setting chunkcount to 1", -1);
+            Log($"Force setting parallel to 1", -1);
 
-            _settings.ChunkCount = 1;
+            _settings.Parallel = 1;
+        }
+        else if (_settings.ChunkSize > contentSize)
+        {
+            Log($"Force setting chunk size to ${contentSize}", -1);
+
+            _settings.ChunkSize = (Int32) contentSize;
+            _settings.Parallel = 1;
         }
 
-        var tasks = new List<Task>();
+        Log($"Calculating chunks", -1);
 
-        // Determine the size of each chunk based on the given chunk count.
-        var chunkSize = contentSize / _settings.ChunkCount;
+        var chunks = new List<Chunk>();
 
-        Log($"ChunkSize {chunkSize}", -1);
-
-        // If the chunk count is smaller than the buffer size, reduce the chunk count and re-calculate.
-        // Downloading smaller than the buffer gives unexpected results and doesn't make any sense.
-        while (chunkSize < _settings.BufferSize && _settings.ChunkCount > 1)
+        for (var startByte = 0; startByte < contentSize; startByte += _settings.ChunkSize)
         {
-            _settings.ChunkCount--;
-            chunkSize = contentSize / _settings.ChunkCount;
-        }
-
-        Log($"ChunkSize {chunkSize}", -1);
-
-        for (var i = 0; i < _settings.ChunkCount; i++)
-        {
-            Log($"Starting thread", i);
-
-            // Calcuate the position of each chunk it needs to download, make sure the last chunk downloads the remainder.
-            var startByte = i * (contentSize / _settings.ChunkCount);
-            var endByte = i == _settings.ChunkCount - 1 ? contentSize : startByte + chunkSize;
+            var endByte = Math.Min(startByte + _settings.ChunkSize, contentSize);
             var length = endByte - startByte;
 
-            Log($"StartByte {startByte}", i);
-            Log($"EndByte {endByte}", i);
-            Log($"LengthBytes {length}", i);
+            Log($"Add chunk {startByte} - {endByte} ({length})", -1);
 
-            _chunks.Add(new ChunkDownloadProgress
+            chunks.Add(new Chunk
             {
                 StartByte = startByte,
                 EndByte = endByte,
                 LengthBytes = length
             });
-
-            Log($"Adding task", i);
-            tasks.Add(Download(i, startByte, endByte));
         }
 
-        Log($"All tasks added", -1);
+        Log($"Chunks: {chunks.Count}", -1);
+
+        _settings.Parallel = Math.Min(_settings.Parallel, chunks.Count);
 
         var completed = false;
         Exception? exception = null;
 
-        // Start all tasks and wait for them all toe complete.
-        // If an exception occurs, store it for later use, but make sure the fileSteam always closes.
+        // Open a filestream that allows multiple tasks writing to the stream simultaniously.
+        // Use the semaphore to make sure only 1 task can write to the file at the same time
+        // as we are using Seek to seek through the stream.
+        var fileStream = new FileStream(_path, FileMode.Create, FileAccess.Write, FileShare.None, _settings.BufferSize, true);
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
         // ReSharper disable once MethodSupportsCancellation
-        _= Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
-            Log($"Waiting for all tasks to complete", -1);
+            Log($"Starting download tasks with {_settings.Parallel} parallel downloads", -1);
+
             try
             {
-                // Unfortunately WhenAll blocks and waits for ALL tasks to complete.
-                // If a single chunk errors out, it will still wait for all the other chunks to complete.
-                await Task.WhenAll(tasks);
+                var tasks = new List<Task>();
+
+                for (var i = 0; i < chunks.Count; i++)
+                {
+                    var chunk = chunks[i];
+
+                    if (tasks.Count >= _settings.Parallel)
+                    {
+                        await AwaitAndProcessTask(tasks, cts);
+                    }
+
+                    tasks.Add(Download(i, chunk, cts.Token));
+                }
+
+                while (tasks.Count > 0)
+                {
+                    await AwaitAndProcessTask(tasks, cts);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 Log($"All tasks completed successful", -1);
+            }
+            catch (AggregateException ex)
+            {
+                if (ex.InnerExceptions.Count == 1)
+                {
+                    exception = ex.InnerExceptions[0];
+                }
+                else
+                {
+                    var notCancelledNotTimeoutException = ex.InnerExceptions.FirstOrDefault(m => m is not TaskCanceledException && m is not TimeoutException);
+                    exception = notCancelledNotTimeoutException;
+
+                    if (exception == null)
+                    {
+                        var notCancelledNotException = ex.InnerExceptions.FirstOrDefault(m => m is not TaskCanceledException);
+                        exception = notCancelledNotException;
+                    }
+
+                    exception ??= ex;
+                }
             }
             catch (Exception ex)
             {
@@ -209,10 +264,7 @@ public class Downloader : IDisposable
             }
             finally
             {
-                _fileStream.Close();
                 completed = true;
-                _httpClient.Dispose();
-
                 Log($"Complete", -1);
             }
         });
@@ -226,36 +278,103 @@ public class Downloader : IDisposable
 
             while (!completed)
             {
-                OnProgress?.Invoke(_chunks);
+                OnProgress?.Invoke(chunks);
 
                 // ReSharper disable once MethodSupportsCancellation
                 await Task.Delay(_settings.UpdateTime);
             }
 
-            OnProgress?.Invoke(_chunks);
+            OnProgress?.Invoke(chunks);
 
-            OnComplete?.Invoke(exception);
+            Log($"Waiting for file write to complete", -1);
+
+            // Wait for the file buffer to finish writing
+            // ReSharper disable once LoopVariableIsNeverChangedInsideLoop
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalse
+            while (fileStream != null)
+            {
+                // ReSharper disable once MethodSupportsCancellation
+                await Task.Delay(_settings.UpdateTime);
+            }
+
+            Log($"Finished waiting for file write", -1);
+
+            OnComplete?.Invoke(contentSize, exception);
 
             Log($"End OnProgress runner", -1);
         });
 
-        // Because above 2 tasks are running async the Download method will return immediatly.
+        // Periodically write the queue to the disk.
+        // ReSharper disable once MethodSupportsCancellation
+        _ = Task.Run(async () =>
+        {
+            Log($"Start FileQueue runner", -1);
+
+            while (!completed || _fileBuffer.Count > 0)
+            {
+                if (_fileBuffer.TryDequeue(out var fileChunk))
+                {
+                    fileStream.Seek(fileChunk.Position, SeekOrigin.Begin);
+
+                    // ReSharper disable once MethodSupportsCancellation
+                    await fileStream.WriteAsync(fileChunk.Buffer, 0, fileChunk.Length);
+
+                    _bufferPool.Return(fileChunk.Buffer);
+                }
+                else
+                {
+                    // ReSharper disable once MethodSupportsCancellation
+                    await Task.Delay(1);
+                }
+            }
+            
+            Log($"File writing complete", -1);
+
+            fileStream.Close();
+            fileStream = null;
+
+            Log($"End FileQueue runner", -1);
+        });
+
+        // Because above tasks are running async the Download method will return immediatly.
+    }
+
+    /// <summary>
+    /// Wait for a task to complete in the task list, if it's faulted, cancel the cancellation token which
+    /// cancels all other tasks, then rethrow the exception.
+    /// </summary>
+    /// <param name="tasks">List of tasks to await</param>
+    /// <param name="cts">The cancellation token source to cancel when a task is faulted.</param>
+    /// <returns></returns>
+    private static async Task AwaitAndProcessTask(List<Task> tasks, CancellationTokenSource cts)
+    {
+        var completedTask = await Task.WhenAny(tasks);
+        tasks.Remove(completedTask);
+
+        if (completedTask.IsFaulted)
+        {
+            cts.Cancel();
+            throw completedTask.Exception ?? new Exception("A task was faulted without throwing an exception");
+        }
     }
 
     /// <summary>
     /// Download a chunk.
     /// </summary>
     /// <param name="thread">The index of the chunk.</param>
-    /// <param name="startByte">The start byte position of the stream to read.</param>
-    /// <param name="endByte">The end byte position of the stream to read to.</param>
+    /// <param name="chunk">The chunk to download.</param>
+    /// <param name="cancellationToken">The cancellation token to cancel the download.</param>
     /// <exception cref="TimeoutException">Occurs when the Settings.Timeout has reached and no data has come in since.</exception>
-    private async Task Download(Int32 thread, Int64 startByte, Int64 endByte)
+    private async Task Download(Int64 thread, Chunk chunk, CancellationToken cancellationToken)
     {
-        var attempt = 0;
+        var retry = 0;
         var complete = false;
         Exception? lastException = null;
 
-        while (attempt < _settings.RetryCount && !complete)
+        var startByte = chunk.StartByte;
+        var endByte = chunk.EndByte;
+        
+        while (retry <= _settings.RetryCount && !complete && !cancellationToken.IsCancellationRequested)
         {
             try
             {
@@ -266,7 +385,7 @@ public class Downloader : IDisposable
                 request.Headers.Range = new RangeHeaderValue(startByte, endByte);
 
                 // Using ResponseHeadersRead gives more control of the result stream.
-                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, _cancellationToken);
+                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -289,9 +408,9 @@ public class Downloader : IDisposable
                 // Move the cancellationToken into a task completion source so that we can always
                 // cancel the task, even if the stream is hanging.
                 var cancellationCompletionSource = new TaskCompletionSource<Boolean>();
-                _cancellationToken.Register(() => cancellationCompletionSource.TrySetResult(true));
+                cancellationToken.Register(() => cancellationCompletionSource.TrySetResult(true));
 
-                var bandwidth = new Bandwidth(_settings.MaximumBytesPerSecond / _settings.ChunkCount);
+                var bandwidth = new Bandwidth(_settings.MaximumBytesPerSecond / _settings.Parallel);
 
                 var buffer = new Byte[_settings.BufferSize];
 
@@ -307,7 +426,7 @@ public class Downloader : IDisposable
                 // Keep reading until the download is completed, or a timeout occurs, or the cancellation token is cancelled.
                 while (true)
                 {
-                    var bytesReadTask = stream.ReadAsync(buffer, 0, buffer.Length, _cancellationToken);
+                    var bytesReadTask = stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
                     var completedTask = await Task.WhenAny(bytesReadTask, timeoutCompletionSource.Task, cancellationCompletionSource.Task);
 
                     if (completedTask == timeoutCompletionSource.Task)
@@ -325,6 +444,9 @@ public class Downloader : IDisposable
                     }
 
                     var bytesRead = await bytesReadTask;
+
+                    // Reset the stream timeout timer.
+                    timer.Change(TimeSpan.FromMilliseconds(_settings.Timeout), Timeout.InfiniteTimeSpan);
 
                     // If no more bytes are read in the stream the download is complete.
                     if (bytesRead == 0)
@@ -344,67 +466,68 @@ public class Downloader : IDisposable
                         // ReSharper disable once MethodSupportsCancellation
                         await Task.Delay(delayTime);
                     }
+                    
+                    chunk.Speed = bandwidth.Speed;
+                    chunk.DownloadBytes = totalBytesRead;
 
-                    // Write the result of the buffer to the disk by setting the lock so no other
-                    // chunks can write at the same time, seek in the stream to the current position,
-                    // then write the buffer to the file stream.
-                    await _fileSemaphore.WaitAsync(_cancellationToken);
-
-                    try
+                    if (chunk.LengthBytes > 0)
                     {
-                        _chunks[thread].Speed = bandwidth.Speed;
-                        _chunks[thread].DownloadBytes = totalBytesRead;
-
-                        if (_chunks[thread].LengthBytes > 0)
-                        {
-                            _chunks[thread].Progress = ((Double) totalBytesRead / (Double) _chunks[thread].LengthBytes) * 100;
-                        }
-
-                        _fileStream.Seek(position, SeekOrigin.Begin);
-
-                        // ReSharper disable once MethodSupportsCancellation
-                        await _fileStream.WriteAsync(buffer, 0, bytesRead);
-                        position += bytesRead;
-                    }
-                    finally
-                    {
-                        _fileSemaphore.Release();
+                        chunk.Progress = ((Double) totalBytesRead / chunk.LengthBytes) * 100;
                     }
 
-                    // Reset the stream timeout timer.
-                    timer.Change(TimeSpan.FromMilliseconds(_settings.Timeout), Timeout.InfiniteTimeSpan);
+                    // Write the results to the file queue to be written to disk later.
 
-                    attempt = 0;
+                    var tempBuffer = _bufferPool.Rent(buffer.Length);
+
+                    _fileBuffer.Enqueue(new FileChunk(position, bytesRead, tempBuffer));
+
+                    Array.Copy(buffer, tempBuffer, buffer.Length);
+
+                    position += bytesRead;
+
+                    lastException = null;
                 }
 
                 complete = true;
             }
             catch (Exception ex)
             {
-                Log($"Exception, retry {attempt}", thread);
+                Log($"Exception, retry {retry}", thread);
                 Log(ex, thread);
 
+                if (ex.Message.Contains("The response ended prematurely, with at least 1 additional bytes expected."))
+                {
+                    endByte--;
+                }
+                
                 lastException = ex;
 
-                if (!ex.Message.StartsWith("The response ended prematurely"))
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    attempt++;
+                    break;
+                }
 
-                    if (attempt > 5)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(5), _cancellationToken);
-                    }
-                    else
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(attempt), _cancellationToken);
-                    }
+                retry++;
+
+                if (retry > 5)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+                else
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(retry), cancellationToken);
                 }
             }
         }
 
+        if (cancellationToken.IsCancellationRequested)
+        {
+            throw new TaskCanceledException();
+        }
+
         if (complete)
         {
-            _chunks[thread].Completed = true;
+            chunk.Completed = true;
         }
         else if (lastException != null)
         {
@@ -421,10 +544,10 @@ public class Downloader : IDisposable
     /// </summary>
     /// <returns>The content size in bytes. Will return -1 if the server does not support getting the content size.</returns>
     /// <exception cref="Exception"></exception>
-    private async Task<Int64> GetContentSize()
+    private async Task<Int64> GetContentSize(CancellationToken cancellationToken)
     {
         Log($"GetContentSize start", -1);
-        var responseHeaders = await _httpClient.SendAsync(new HttpRequestMessage(HttpMethod.Head, _uri), _cancellationToken);
+        var responseHeaders = await _httpClient.SendAsync(new HttpRequestMessage(HttpMethod.Head, _uri), cancellationToken);
 
         if (!responseHeaders.IsSuccessStatusCode)
         {
@@ -443,7 +566,7 @@ public class Downloader : IDisposable
         return result;
     }
 
-    private void Log(String message, Int32 chunk)
+    private void Log(String message, Int64 chunk)
     {
         OnLog?.Invoke(new LogMessage
         {
@@ -452,7 +575,7 @@ public class Downloader : IDisposable
         });
     }
 
-    private void Log(Exception ex, Int32 chunk)
+    private void Log(Exception ex, Int64 chunk)
     {
         OnLog?.Invoke(new LogMessage
         {
@@ -464,7 +587,20 @@ public class Downloader : IDisposable
 
     public void Dispose()
     {
-        _fileStream.Dispose();
-        _fileSemaphore.Dispose();
+        _httpClient.Dispose();
+    }
+
+    private class FileChunk
+    {
+        public FileChunk(Int64 position, Int32 length, Byte[] buffer)
+        {
+            Position = position;
+            Length = length;
+            Buffer = buffer;
+        }
+
+        public Int64 Position { get; }
+        public Int32 Length { get; }
+        public Byte[] Buffer { get; }
     }
 }

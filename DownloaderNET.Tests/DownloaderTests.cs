@@ -7,7 +7,7 @@ public class DownloaderTests : BaseTest
     {
         var sha = await Download(new Options
         {
-            DownloaderChunkCount = 1
+            Parallel = 1
         });
         Assert.Equal(GetHash("test.bin"), sha);
     }
@@ -20,11 +20,11 @@ public class DownloaderTests : BaseTest
     [InlineData(10)]
     [InlineData(25)]
     [InlineData(50)]
-    public async Task MultipleChunks(Int32 chunkCount)
+    public async Task MultipleChunks(Int32 parallel)
     {
         var sha = await Download(new Options
         {
-            DownloaderChunkCount = chunkCount
+            Parallel = parallel
         });
         Assert.Equal(GetHash("test.bin"), sha);
     }
@@ -34,7 +34,7 @@ public class DownloaderTests : BaseTest
     {
         var sha = await Download(new Options
         {
-            DownloaderChunkCount = 81
+            Parallel = 81
         });
         var shab = GetHash("test.bin");
         Assert.Equal(shab, sha);
@@ -44,11 +44,11 @@ public class DownloaderTests : BaseTest
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]
-    public async Task Large(Int32 chunkCount)
+    public async Task Large(Int32 parallel)
     {
         var sha = await Download(new Options
         {
-            DownloaderChunkCount = chunkCount,
+            Parallel = parallel,
             ServerSize = 1000000
         });
         var shab = GetHash("test.bin");
@@ -59,12 +59,12 @@ public class DownloaderTests : BaseTest
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]
-    public async Task FailedChunk(Int32 chunkCount)
+    public async Task FailedChunk(Int32 parallel)
     {
-        await Assert.ThrowsAsync<IOException>(() => Download(new Options
+        await Assert.ThrowsAsync<HttpIOException>(() => Download(new Options
         {
-            DownloaderChunkCount = chunkCount,
-            ServerFailAfterBytes = 20000
+            Parallel = parallel,
+            ServerFailAfterBytes = 328893
         }));
     }
     
@@ -72,12 +72,12 @@ public class DownloaderTests : BaseTest
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]
-    public async Task FailedRetryChunk(Int32 chunkCount)
+    public async Task FailedRetryChunk(Int32 parallel)
     {
-        await Assert.ThrowsAsync<IOException>(() => Download(new Options
+        await Assert.ThrowsAsync<HttpIOException>(() => Download(new Options
         {
-            DownloaderChunkCount = chunkCount,
-            ServerFailAfterBytes = 20000,
+            Parallel = parallel,
+            ServerFailAfterBytes = 328893,
             DownloaderRetryCount = 1
         }));
     }
@@ -86,11 +86,11 @@ public class DownloaderTests : BaseTest
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]
-    public async Task SuccessAfterRetryChunk(Int32 chunkCount)
+    public async Task SuccessAfterRetryChunk(Int32 parallel)
     {
         var sha = await Download(new Options
         {
-            DownloaderChunkCount = chunkCount,
+            Parallel = parallel,
             ServerFailAfterBytes = 20000,
             DownloaderRetryCount = 2
         });
@@ -98,17 +98,13 @@ public class DownloaderTests : BaseTest
         Assert.Equal(shab, sha);
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(4)]
-    public async Task RequestTimeout(Int32 chunkCount)
+    [Fact]
+    public async Task RequestTimeout()
     {
         await Assert.ThrowsAsync<TaskCanceledException>(() => Download(new Options
         {
-            DownloaderChunkCount = chunkCount,
             DownloaderTimeout = 100,
-            ServerRequestTimeout = 200
+            ServerRequestTimeout = 31000
         }));
     }
     
@@ -116,11 +112,11 @@ public class DownloaderTests : BaseTest
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]
-    public async Task StreamTimeout(Int32 chunkCount)
+    public async Task StreamTimeout(Int32 parallel)
     {
         await Assert.ThrowsAsync<TimeoutException>(() => Download(new Options
         {
-            DownloaderChunkCount = chunkCount,
+            Parallel = parallel,
             DownloaderTimeout = 100,
             ServerStreamTimeout = 200
         }));
@@ -130,14 +126,15 @@ public class DownloaderTests : BaseTest
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(4)]
-    public async Task DownloadCancelled(Int32 chunkCount)
+    public async Task DownloadCancelled(Int32 parallel)
     {
-        var cancellationToken = new CancellationTokenSource(1000);
+        var cancellationToken = new CancellationTokenSource(2000);
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => Download(new Options
         {
-            DownloaderChunkCount = chunkCount,
-            ServerStreamTimeout = 100
+            Parallel = parallel,
+            DownloaderTimeout = 5000,
+            ServerStreamTimeout = 2000
         }, cancellationToken.Token));
     }
 }

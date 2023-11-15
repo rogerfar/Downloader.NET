@@ -3,10 +3,16 @@
 public class Settings
 {
     /**
-     * The amount of parallel chunks to download the file with.
+     * The amount of tasks to download a chunk with.
      * Default = 1
      */
-    public Int32 ChunkCount { get; set; }
+    public Int32 Parallel { get; set; }
+
+    /**
+     * The size in bytes of a chunk to download.
+     * When unset (or 0), it automatically determines the optimal size based on the download file size.
+     */
+    public Int32 ChunkSize { get; set; }
 
     /**
      * The buffer size to process files with. Higher is faster but uses more memory.

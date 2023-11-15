@@ -1,6 +1,6 @@
 ﻿using DownloaderNET;
 
-const String url = "http://speedtest.newark.linode.com/100MB-newark.bin";
+const String url = "https://sea2.download.real-debrid.com/d/VJVN43U2ETMLW20/PAW.Patrol.The.Mighty.Movie.2023.1080p.AMZN.WEBRip.DDP5.1.x265.10bit-GalaxyRG265.mkv";
 const String path = "result.mp4";
 const String hash = "7b3d96bd611dd68a6d7e185dce41f46c8ec4b8e013dd27bb965931ffe917dfb2";
 
@@ -11,9 +11,10 @@ if (File.Exists(path))
 
 var downloader = new Downloader(url, path, new Settings
 {
-    ChunkCount = 8,
+    Parallel = 8,
     BufferSize = 4096,
-    MaximumBytesPerSecond = 1024 * 1024 * 30,
+    ChunkSize = 0,
+    MaximumBytesPerSecond = 1024 * 1024 * 100,
     RetryCount = 5,
     Timeout = 30000,
     UpdateTime = 10
@@ -49,28 +50,35 @@ downloader.OnProgress += chunks =>
         {
             Console.WriteLine($"Thread {i} completed");
         }
-        else
+        else if (chunk.IsActive)
         {
             Console.WriteLine($"Thread {i} @ {chunk.Speed.ToMemoryMensurableUnit()}/s ({chunk.Progress:N2}%)");
         }
     }
 
-    Console.WriteLine($"Avg {chunks.Sum(m => m.Speed).ToMemoryMensurableUnit()}/s ({p}%)");
+    Console.WriteLine($"Avg {chunks.Where(m => m.IsActive).Sum(m => m.Speed).ToMemoryMensurableUnit()}/s ({p}%)");
 };
 
+var start = DateTimeOffset.UtcNow;
+
 var complete = false;
-downloader.OnComplete += async ex =>
+downloader.OnComplete += async (contentSize, ex) =>
 {
     if (ex != null)
     {
         Console.WriteLine(ex.Message);
     }
 
-    using var SHA256 = System.Security.Cryptography.SHA256.Create();
+    var elapsed = DateTimeOffset.UtcNow - start;
+    var speed = contentSize / elapsed.TotalSeconds;
+
+    Console.WriteLine($"Downloaded {contentSize.ToMemoryMensurableUnit()} in {elapsed} (avg {speed.ToMemoryMensurableUnit()})");
+
+    using var sha256 = System.Security.Cryptography.SHA256.Create();
 
     await using var fileStream = File.OpenRead(path);
 
-    var fileHash = BitConverter.ToString(SHA256.ComputeHash(fileStream)).Replace("-", "").ToLowerInvariant();
+    var fileHash = BitConverter.ToString(sha256.ComputeHash(fileStream)).Replace("-", "").ToLowerInvariant();
 
     if (fileHash != hash)
     {

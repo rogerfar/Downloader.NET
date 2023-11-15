@@ -20,4 +20,9 @@ public static class Helpers
 
         return result;
     }
+
+    public static String ToMemoryMensurableUnit(this Int64 bytes)
+    {
+        return ((Double)bytes).ToMemoryMensurableUnit();
+    }
 }

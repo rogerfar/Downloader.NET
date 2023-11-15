@@ -1,6 +1,6 @@
 ﻿namespace DownloaderNET;
 
-public class ChunkDownloadProgress
+public class Chunk
 {
     public Int64 StartByte { get; set; }
     public Int64 EndByte { get; set; }
@@ -9,4 +9,6 @@ public class ChunkDownloadProgress
     public Double Speed { get; set; }
     public Boolean Completed { get; set; }
     public Double Progress { get; set; }
+
+    public Boolean IsActive => DownloadBytes > 0 && DownloadBytes < LengthBytes;
 }

@@ -23,6 +23,12 @@ public class BaseTest
         var app = builder.Build();
         
         _root = Path.Combine(app.Environment.ContentRootPath, "test");
+
+        if (!Directory.Exists(_root))
+        {
+            Directory.CreateDirectory(_root);
+        }
+
         _randomPort = new Random().Next(6000, 7000);
 
         app.UseDeveloperExceptionPage();
@@ -138,18 +144,19 @@ public class BaseTest
         var downloader = new Downloader($"http://localhost:{_randomPort}/", fn, new Settings
         {
             RetryCount = options.DownloaderRetryCount,
-            ChunkCount = options.DownloaderChunkCount,
-            Timeout = options.DownloaderTimeout
-        }, cancellationToken);
+            Parallel = options.Parallel,
+            Timeout = options.DownloaderTimeout,
+            ChunkSize = (Int32) Math.Ceiling(328894.0 / options.Parallel)
+        });
         
-        downloader.OnComplete += ex =>
+        downloader.OnComplete += (_, ex) =>
         {
             exception = ex;
             tcs.SetResult(true);
             return Task.CompletedTask;
         };
 
-        await downloader.Download();
+        await downloader.Download(cancellationToken);
 
         await tcs.Task;
 
@@ -213,7 +220,7 @@ public class BaseTest
 
 public class Options
 {
-    public Int32 DownloaderChunkCount { get; init; } = 1;
+    public Int32 Parallel { get; init; } = 1;
 
     public Int32 DownloaderRetryCount { get; init; }
 
