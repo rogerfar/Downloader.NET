@@ -15,20 +15,31 @@ var downloader = new Downloader(url, path, new Settings
     BufferSize = 4096,
     MaximumBytesPerSecond = 1024 * 1024 * 30,
     RetryCount = 5,
-    Timeout = 5000,
+    Timeout = 30000,
     UpdateTime = 10
 });
 
+downloader.OnLog = message =>
+{
+    Console.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] [{message.Thread}] {message.Message}");
+
+    if (message.Exception != null)
+    {
+        Console.WriteLine(message.Exception.StackTrace);
+    }
+};
+
+var last = -1;
 downloader.OnProgress += chunks =>
 {
-    Console.SetCursorPosition(0, 0);
+    var p = (Int32) Math.Round(chunks.Sum(m => m.Progress) / chunks.Count);
 
-    for (var i = 0; i < chunks.Count + 1; i++)
+    if (p == last)
     {
-        Console.WriteLine("                                               ");
+        return;
     }
 
-    Console.SetCursorPosition(0, 0);
+    last = p;
 
     for (var i = 0; i < chunks.Count; i++)
     {
@@ -44,14 +55,14 @@ downloader.OnProgress += chunks =>
         }
     }
 
-    Console.WriteLine($"Avg {chunks.Sum(m => m.Speed).ToMemoryMensurableUnit()}/s ({Math.Round(chunks.Sum(m => m.Progress) / chunks.Count)}%)");
+    Console.WriteLine($"Avg {chunks.Sum(m => m.Speed).ToMemoryMensurableUnit()}/s ({p}%)");
 };
 
+var complete = false;
 downloader.OnComplete += async ex =>
 {
     if (ex != null)
     {
-        Console.Clear();
         Console.WriteLine(ex.Message);
     }
 
@@ -74,9 +85,14 @@ downloader.OnComplete += async ex =>
     {
         File.Delete(path);
     }
+
+    complete = true;
 };
 
 await downloader.Download();
 
-Console.WriteLine("Downloading");
-Console.ReadKey();
+while (!complete)
+{
+    await Task.Delay(10000);
+}
+Console.WriteLine("Done");

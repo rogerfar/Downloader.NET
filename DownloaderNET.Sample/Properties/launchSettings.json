@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "DownloaderNET.Sample": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}
