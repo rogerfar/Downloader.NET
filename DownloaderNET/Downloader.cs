@@ -443,7 +443,18 @@ public class Downloader : IDisposable
                         throw new OperationCanceledException();
                     }
 
-                    var bytesRead = await bytesReadTask;
+                    var bytesRead = 0;
+                    try
+                    {
+                        bytesRead = await bytesReadTask;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!ex.Message.Contains("The response ended prematurely"))
+                        {
+                            throw;
+                        }
+                    }
 
                     // Reset the stream timeout timer.
                     timer.Change(TimeSpan.FromMilliseconds(_settings.Timeout), Timeout.InfiniteTimeSpan);
@@ -494,11 +505,6 @@ public class Downloader : IDisposable
             {
                 Log($"Exception, retry {retry}", thread);
                 Log(ex, thread);
-
-                if (ex.Message.Contains("The response ended prematurely, with at least 1 additional bytes expected."))
-                {
-                    endByte--;
-                }
                 
                 lastException = ex;
 
