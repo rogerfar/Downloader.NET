@@ -31,7 +31,7 @@ downloader.OnLog = message =>
 };
 
 var last = -1;
-downloader.OnProgress += chunks =>
+downloader.OnProgress += (chunks, fileQueue) =>
 {
     var p = (Int32) Math.Round(chunks.Sum(m => m.Progress) / chunks.Count);
 
@@ -57,6 +57,7 @@ downloader.OnProgress += chunks =>
     }
 
     Console.WriteLine($"Avg {chunks.Where(m => m.IsActive).Sum(m => m.Speed).ToMemoryMensurableUnit()}/s ({p}%)");
+    Console.WriteLine($"FileQueue length: {fileQueue}");
 };
 
 var start = DateTimeOffset.UtcNow;

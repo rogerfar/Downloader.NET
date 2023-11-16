@@ -14,7 +14,7 @@ public class Downloader : IDisposable
     /**
      * The OnProgress event will periodically be fired with the current state.
      */
-    public Action<IList<Chunk>>? OnProgress { get; set; }
+    public Action<IList<Chunk>, Int32>? OnProgress { get; set; }
 
     /**
      * The OnComplete will fire when all chunks are finished and the file has been written to disk completely.
@@ -177,7 +177,7 @@ public class Downloader : IDisposable
 
         var chunks = new List<Chunk>();
 
-        for (var startByte = 0; startByte < contentSize; startByte += _settings.ChunkSize)
+        for (var startByte = 0L; startByte < contentSize; startByte += _settings.ChunkSize)
         {
             var endByte = Math.Min(startByte + _settings.ChunkSize, contentSize);
             var length = endByte - startByte;
@@ -278,13 +278,13 @@ public class Downloader : IDisposable
 
             while (!completed)
             {
-                OnProgress?.Invoke(chunks);
+                OnProgress?.Invoke(chunks, _fileBuffer.Count);
 
                 // ReSharper disable once MethodSupportsCancellation
                 await Task.Delay(_settings.UpdateTime);
             }
 
-            OnProgress?.Invoke(chunks);
+            OnProgress?.Invoke(chunks, _fileBuffer.Count);
 
             Log($"Waiting for file write to complete", -1);
 
