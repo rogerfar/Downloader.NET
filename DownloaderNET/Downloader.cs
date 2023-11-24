@@ -33,6 +33,8 @@ public class Downloader : IDisposable
     private readonly ConcurrentQueue<FileChunk> _fileBuffer;
     private readonly HttpClient _httpClient;
     private readonly ArrayPool<Byte> _bufferPool = ArrayPool<Byte>.Shared;
+    
+    private DateTimeOffset _lastGc = DateTimeOffset.UtcNow;
 
     /// <summary>
     /// Construct the Downloader.
@@ -217,6 +219,11 @@ public class Downloader : IDisposable
 
                 for (var i = 0; i < chunks.Count; i++)
                 {
+                    while (!_fileBuffer.IsEmpty)
+                    {
+                        await Task.Delay(1);
+                    }
+
                     var chunk = chunks[i];
 
                     if (tasks.Count >= _settings.Parallel)
@@ -299,6 +306,8 @@ public class Downloader : IDisposable
 
             Log($"Finished waiting for file write", -1);
 
+            GC.Collect();
+
             OnComplete?.Invoke(contentSize, exception);
 
             Log($"End OnProgress runner", -1);
@@ -346,10 +355,16 @@ public class Downloader : IDisposable
     /// <param name="tasks">List of tasks to await</param>
     /// <param name="cts">The cancellation token source to cancel when a task is faulted.</param>
     /// <returns></returns>
-    private static async Task AwaitAndProcessTask(List<Task> tasks, CancellationTokenSource cts)
+    private async Task AwaitAndProcessTask(List<Task> tasks, CancellationTokenSource cts)
     {
         var completedTask = await Task.WhenAny(tasks);
         tasks.Remove(completedTask);
+
+        if (_lastGc < DateTimeOffset.UtcNow)
+        {
+            _lastGc = DateTimeOffset.UtcNow.AddSeconds(10);
+            GC.Collect();
+        }
 
         if (completedTask.IsFaulted)
         {
@@ -412,8 +427,6 @@ public class Downloader : IDisposable
 
                 var bandwidth = new Bandwidth(_settings.MaximumBytesPerSecond / _settings.Parallel);
 
-                var buffer = new Byte[_settings.BufferSize];
-
                 var totalBytesRead = 0L;
 
                 var position = startByte;
@@ -426,7 +439,9 @@ public class Downloader : IDisposable
                 // Keep reading until the download is completed, or a timeout occurs, or the cancellation token is cancelled.
                 while (true)
                 {
-                    var bytesReadTask = stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
+                    var tempBuffer = _bufferPool.Rent(_settings.BufferSize);
+
+                    var bytesReadTask = stream.ReadAsync(tempBuffer, 0, tempBuffer.Length, cancellationToken);
                     var completedTask = await Task.WhenAny(bytesReadTask, timeoutCompletionSource.Task, cancellationCompletionSource.Task);
 
                     if (completedTask == timeoutCompletionSource.Task)
@@ -487,12 +502,7 @@ public class Downloader : IDisposable
                     }
 
                     // Write the results to the file queue to be written to disk later.
-
-                    var tempBuffer = _bufferPool.Rent(buffer.Length);
-
                     _fileBuffer.Enqueue(new FileChunk(position, bytesRead, tempBuffer));
-
-                    Array.Copy(buffer, tempBuffer, buffer.Length);
 
                     position += bytesRead;
 
