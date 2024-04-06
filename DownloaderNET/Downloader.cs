@@ -586,7 +586,7 @@ public class Downloader : IDisposable
 
     private void Log(String message, Int64 chunk, Int32 logLevel = 0)
     {
-        if (logLevel >= _settings.LogLevel)
+        if (_settings == null || logLevel >= _settings.LogLevel)
         {
             OnLog?.Invoke(new LogMessage
                           {
@@ -598,7 +598,7 @@ public class Downloader : IDisposable
 
     private void Log(Exception ex, Int64 chunk)
     {
-        if (_settings.LogLevel >= 4)
+        if (_settings == null || _settings.LogLevel >= 4)
         {
             OnLog?.Invoke(new LogMessage
                           {
