@@ -20,7 +20,7 @@ var downloader = new Downloader(url, path, new Settings
     UpdateTime = 10
 });
 
-downloader.OnLog = message =>
+downloader.OnLog = (message, _) =>
 {
     Console.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] [{message.Thread}] {message.Message}");
 

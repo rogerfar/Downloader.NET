@@ -25,7 +25,17 @@ public class Downloader : IDisposable
     /**
      * Log debug messages.
      */
-    public Action<LogMessage>? OnLog { get; set; }
+    public Action<LogMessage, Int32>? OnLog { get; set; }
+
+    /**
+     * Log level:
+     * 0: Verbose
+     * 1: Debug
+     * 2: Information
+     * 3: Warning
+     * 4: Error
+     */
+    public Int32 LogLevel { get; set; } = 4;
 
     private readonly Uri _uri;
     private readonly String _path;
@@ -46,7 +56,7 @@ public class Downloader : IDisposable
     {
         Log("Constructor start", -1);
 
-        Log($"Setting URL {url}", -1);
+        Log($"Setting URL {url}", -1, 1);
 
         _uri = new Uri(url);
         _path = path;
@@ -211,7 +221,7 @@ public class Downloader : IDisposable
         // ReSharper disable once MethodSupportsCancellation
         _ = Task.Run(async () =>
         {
-            Log($"Starting download tasks with {_settings.Parallel} parallel downloads", -1);
+            Log($"Starting download tasks with {_settings.Parallel} parallel downloads", -1, 1);
 
             try
             {
@@ -241,7 +251,7 @@ public class Downloader : IDisposable
 
                 cancellationToken.ThrowIfCancellationRequested();
 
-                Log($"All tasks completed successful", -1);
+                Log($"All tasks completed successful", -1, 1);
             }
             catch (AggregateException ex)
             {
@@ -272,7 +282,7 @@ public class Downloader : IDisposable
             finally
             {
                 completed = true;
-                Log($"Complete", -1);
+                Log($"Complete", -1, 1);
             }
         });
 
@@ -575,30 +585,38 @@ public class Downloader : IDisposable
         }
 
         var result = responseHeaders.Content.Headers.ContentLength ?? -1;
-        Log($"Content size {result}", -1);
+        Log($"Content size {result}", -1, 1);
 
         Log($"GetContentSize end", -1);
 
         return result;
     }
 
-    private void Log(String message, Int64 chunk)
+    private void Log(String message, Int64 chunk, Int32 logLevel = 0)
     {
-        OnLog?.Invoke(new LogMessage
+        if (LogLevel >= logLevel)
         {
-            Message = message,
-            Thread = chunk
-        });
+            OnLog?.Invoke(new LogMessage
+                          {
+                              Message = message,
+                              Thread = chunk
+                          },
+                          logLevel);
+        }
     }
 
     private void Log(Exception ex, Int64 chunk)
     {
-        OnLog?.Invoke(new LogMessage
+        if (LogLevel >= 4)
         {
-            Message = ex.Message,
-            Thread = chunk,
-            Exception = ex
-        });
+            OnLog?.Invoke(new LogMessage
+                          {
+                              Message = ex.Message,
+                              Thread = chunk,
+                              Exception = ex
+                          },
+                          4);
+        }
     }
 
     public void Dispose()
