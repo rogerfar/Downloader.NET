@@ -43,4 +43,15 @@ public class Settings
      * Default = 1000
      */
     public Int32 UpdateTime { get; set; }
+
+    /**
+     * Log level:
+     * 0: Verbose
+     * 1: Debug
+     * 2: Information
+     * 3: Warning
+     * 4: Error
+     * 5: Off
+     */
+    public Int32 LogLevel { get; set; }
 }

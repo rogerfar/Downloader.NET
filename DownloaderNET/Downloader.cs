@@ -27,16 +27,6 @@ public class Downloader : IDisposable
      */
     public Action<LogMessage, Int32>? OnLog { get; set; }
 
-    /**
-     * Log level:
-     * 0: Verbose
-     * 1: Debug
-     * 2: Information
-     * 3: Warning
-     * 4: Error
-     */
-    public Int32 LogLevel { get; set; } = 4;
-
     private readonly Uri _uri;
     private readonly String _path;
     private readonly Settings _settings;
@@ -63,6 +53,7 @@ public class Downloader : IDisposable
 
         settings ??= new Settings
         {
+            LogLevel = 5,
             BufferSize = 4096,
             Parallel = 8,
             ChunkSize = 0,
@@ -231,6 +222,7 @@ public class Downloader : IDisposable
                 {
                     while (!_fileBuffer.IsEmpty)
                     {
+                        // ReSharper disable once MethodSupportsCancellation
                         await Task.Delay(1);
                     }
 
@@ -594,28 +586,26 @@ public class Downloader : IDisposable
 
     private void Log(String message, Int64 chunk, Int32 logLevel = 0)
     {
-        if (LogLevel >= logLevel)
+        if (logLevel >= _settings.LogLevel)
         {
             OnLog?.Invoke(new LogMessage
                           {
                               Message = message,
                               Thread = chunk
-                          },
-                          logLevel);
+                          }, logLevel);
         }
     }
 
     private void Log(Exception ex, Int64 chunk)
     {
-        if (LogLevel >= 4)
+        if (_settings.LogLevel >= 4)
         {
             OnLog?.Invoke(new LogMessage
                           {
                               Message = ex.Message,
                               Thread = chunk,
                               Exception = ex
-                          },
-                          4);
+                          }, 4);
         }
     }
 
