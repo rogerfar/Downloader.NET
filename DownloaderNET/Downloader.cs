@@ -467,7 +467,8 @@ public class Downloader : IDisposable
                     }
                     catch (Exception ex)
                     {
-                        if (!ex.Message.Contains("The response ended prematurely"))
+                        Log(ex.Message, thread);
+                        if (ex.Message.Contains("The response ended prematurely"))
                         {
                             throw;
                         }
