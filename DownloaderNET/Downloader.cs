@@ -33,7 +33,7 @@ public class Downloader : IDisposable
     private readonly ConcurrentQueue<FileChunk> _fileBuffer;
     private readonly HttpClient _httpClient;
     private readonly ArrayPool<Byte> _bufferPool = ArrayPool<Byte>.Shared;
-    
+
     private DateTimeOffset _lastGc = DateTimeOffset.UtcNow;
 
     /// <summary>
@@ -82,7 +82,7 @@ public class Downloader : IDisposable
         {
             settings.MaximumBytesPerSecond = 0;
         }
-        
+
         if (settings.Timeout <= 0)
         {
             settings.Timeout = 30000;
@@ -107,7 +107,7 @@ public class Downloader : IDisposable
         Log($"Setting UpdateTime {settings.UpdateTime}", -1);
 
         _settings = settings;
-        
+
         Log($"Creating filestream", -1);
 
         _fileBuffer = new ConcurrentQueue<FileChunk>();
@@ -120,7 +120,7 @@ public class Downloader : IDisposable
             MaxConnectionsPerServer = _settings.Parallel * 2
         });
         _httpClient.Timeout = TimeSpan.FromMilliseconds(Math.Max(30000, settings.Timeout));
-        
+
         Log($"Constructor done", -1);
     }
 
@@ -172,7 +172,7 @@ public class Downloader : IDisposable
         {
             Log($"Force setting chunk size to ${contentSize}", -1);
 
-            _settings.ChunkSize = (Int32) contentSize;
+            _settings.ChunkSize = (Int32)contentSize;
             _settings.Parallel = 1;
         }
 
@@ -338,7 +338,7 @@ public class Downloader : IDisposable
                     await Task.Delay(1);
                 }
             }
-            
+
             Log($"File writing complete", -1);
 
             fileStream.Close();
@@ -390,7 +390,7 @@ public class Downloader : IDisposable
 
         var startByte = chunk.StartByte;
         var endByte = chunk.EndByte;
-        
+
         while (retry <= _settings.RetryCount && !complete && !cancellationToken.IsCancellationRequested)
         {
             try
@@ -494,13 +494,13 @@ public class Downloader : IDisposable
                         // ReSharper disable once MethodSupportsCancellation
                         await Task.Delay(delayTime);
                     }
-                    
+
                     chunk.Speed = bandwidth.Speed;
                     chunk.DownloadBytes = totalBytesRead;
 
                     if (chunk.LengthBytes > 0)
                     {
-                        chunk.Progress = ((Double) totalBytesRead / chunk.LengthBytes) * 100;
+                        chunk.Progress = ((Double)totalBytesRead / chunk.LengthBytes) * 100;
                     }
 
                     // Write the results to the file queue to be written to disk later.
@@ -517,7 +517,7 @@ public class Downloader : IDisposable
             {
                 Log($"Exception, retry {retry}", thread);
                 Log(ex, thread);
-                
+
                 lastException = ex;
 
                 if (cancellationToken.IsCancellationRequested)
@@ -589,10 +589,10 @@ public class Downloader : IDisposable
         if (_settings == null || logLevel >= _settings.LogLevel)
         {
             OnLog?.Invoke(new LogMessage
-                          {
-                              Message = message,
-                              Thread = chunk
-                          }, logLevel);
+            {
+                Message = message,
+                Thread = chunk
+            }, logLevel);
         }
     }
 
@@ -601,11 +601,11 @@ public class Downloader : IDisposable
         if (_settings == null || _settings.LogLevel >= 4)
         {
             OnLog?.Invoke(new LogMessage
-                          {
-                              Message = ex.Message,
-                              Thread = chunk,
-                              Exception = ex
-                          }, 4);
+            {
+                Message = ex.Message,
+                Thread = chunk,
+                Exception = ex
+            }, 4);
         }
     }
 
