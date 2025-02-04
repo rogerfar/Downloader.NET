@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Headers;
+﻿using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -16,7 +17,7 @@ public class BaseTest
 
     private void StartServer(Options options)
     {
-        var retries = new Dictionary<String, Int32>();
+        var retries = new ConcurrentDictionary<String, Int32>();
 
         var builder = WebApplication.CreateBuilder();
 
@@ -46,7 +47,7 @@ public class BaseTest
 
                                  if (context.Request.Method == "HEAD")
                                  {
-                                     retries = new Dictionary<String, Int32>();
+                                     retries.Clear();
 
                                      var sb = new StringBuilder();
                                      for (var i = 1; i <= options.ServerSize; i++)
