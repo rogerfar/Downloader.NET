@@ -136,7 +136,7 @@ public class BaseTest
     {
         StartServer(options);
 
-        await Task.Delay(10);
+        await Task.Delay(50);
 
         var fn = Path.Combine(_root!, $"result.bin");
 
