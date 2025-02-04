@@ -64,7 +64,7 @@ public class DownloaderTests : BaseTest
         await Assert.ThrowsAsync<HttpIOException>(() => Download(new Options
         {
             Parallel = parallel,
-            ServerFailAfterBytes = 328893
+            ServerFailAfterBytes = 318893
         }));
     }
     
@@ -77,7 +77,7 @@ public class DownloaderTests : BaseTest
         await Assert.ThrowsAsync<HttpIOException>(() => Download(new Options
         {
             Parallel = parallel,
-            ServerFailAfterBytes = 328893,
+            ServerFailAfterBytes = 318893,
             DownloaderRetryCount = 1
         }));
     }

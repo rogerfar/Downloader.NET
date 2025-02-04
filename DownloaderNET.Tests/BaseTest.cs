@@ -136,6 +136,8 @@ public class BaseTest
     {
         StartServer(options);
 
+        await Task.Delay(10);
+
         var fn = Path.Combine(_root!, $"result.bin");
 
         var tcs = new TaskCompletionSource<Boolean>();
