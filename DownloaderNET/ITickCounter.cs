@@ -1,7 +1,6 @@
-
-
+namespace DownloaderNET;
 
 internal interface ITickCounter
 {
-    int GetTickCount();
+    Int32 GetTickCount();
 }

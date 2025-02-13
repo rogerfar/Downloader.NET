@@ -1,13 +1,8 @@
-using Microsoft.AspNetCore.Mvc.Diagnostics;
-using Xunit.Abstractions;
-
 namespace DownloaderNET.Tests;
 
 public class BandwidthTests
 {
-
-
-    private const int OncSec = 1000;
+    private const Int32 OncSec = 1000;
 
     [Fact]
     public void BandwidthSpeedLimit()
@@ -19,7 +14,6 @@ public class BandwidthTests
         mockCounter.Counter += OncSec * 2;
         b.CalculateSpeed(limit * 2);
         Assert.Equal(limit, b.Speed);
-
     }
 
     [Fact]
@@ -44,6 +38,5 @@ public class BandwidthTests
         mockCounter.Counter += OncSec * 2;
         b.CalculateSpeed(limit * 3);
         Assert.Equal(1000, b.PopSpeedRetrieveTime());
-
     }
 }

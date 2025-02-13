@@ -1,12 +1,11 @@
+namespace DownloaderNET.Tests;
 
-
-class MockTickCounter : ITickCounter
+internal class MockTickCounter : ITickCounter
 {
+    public Int32 Counter = 0;
 
-    public int Counter = 0;
-
-    int ITickCounter.GetTickCount()
+    Int32 ITickCounter.GetTickCount()
     {
-        return Counter & int.MaxValue;
+        return Counter & Int32.MaxValue;
     }
 }
