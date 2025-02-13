@@ -182,7 +182,7 @@ public class Downloader : IDisposable
 
         for (var startByte = 0L; startByte < contentSize; startByte += _settings.ChunkSize)
         {
-            var endByte = Math.Min(startByte + _settings.ChunkSize, contentSize);
+            var endByte = Math.Min(startByte + _settings.ChunkSize, contentSize - 1);
             var length = endByte - startByte;
 
             Log($"Add chunk {startByte} - {endByte} ({length})", -1);
