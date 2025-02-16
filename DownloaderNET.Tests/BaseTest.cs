@@ -77,7 +77,7 @@ public class BaseTest
 
                                  if (rangeFrom.HasValue && rangeTo.HasValue)
                                  {
-                                     file = file.AsSpan(rangeFrom.Value, rangeTo.Value - rangeFrom.Value).ToArray();
+                                     file = file.AsSpan(rangeFrom.Value, rangeTo.Value - rangeFrom.Value + 1).ToArray();
                                  }
 
                                  var fileStream = new MemoryStream();
