@@ -135,67 +135,7 @@ public class Downloader : IDisposable
     {
         Log($"Download start", -1);
 
-        // Fetch the content size from the URL, if the content size cannot be fetched,
-        // we can only download with a single chunk.
-        var contentSize = await GetContentSize(cancellationToken);
-
-        if (_settings.ChunkSize == 0)
-        {
-            if (contentSize <= 1024 * 1024 * 10)
-            {
-                _settings.ChunkSize = 1024 * 1024 * 10;
-            }
-            else if (contentSize <= 1024 * 1024 * 100)
-            {
-                _settings.ChunkSize = 1024 * 1024 * 25;
-            }
-            else
-            {
-                _settings.ChunkSize = 1024 * 1024 * 50;
-            }
-
-            Log($"Setting chunk size to {_settings.ChunkSize}", -1);
-        }
-
-        if (_settings.ChunkSize < _settings.BufferSize)
-        {
-            _settings.ChunkSize = _settings.BufferSize;
-        }
-
-        if (contentSize == -1)
-        {
-            Log($"Force setting parallel to 1", -1);
-
-            _settings.Parallel = 1;
-        }
-        else if (_settings.ChunkSize > contentSize)
-        {
-            Log($"Force setting chunk size to ${contentSize}", -1);
-
-            _settings.ChunkSize = (Int32)contentSize;
-            _settings.Parallel = 1;
-        }
-
-        Log($"Calculating chunks", -1);
-
-        var chunks = new List<Chunk>();
-
-        for (var startByte = 0L; startByte < contentSize; startByte += _settings.ChunkSize)
-        {
-            var endByte = Math.Min(startByte + _settings.ChunkSize, contentSize - 1);
-            var length = endByte - startByte;
-
-            Log($"Add chunk {startByte} - {endByte} ({length})", -1);
-
-            chunks.Add(new Chunk
-            {
-                StartByte = startByte,
-                EndByte = endByte,
-                LengthBytes = length
-            });
-        }
-
-        Log($"Chunks: {chunks.Count}", -1);
+        var (chunks, contentSize) = await CalculateChunks(cancellationToken);
 
         _settings.Parallel = Math.Min(_settings.Parallel, chunks.Count);
 
@@ -348,6 +288,87 @@ public class Downloader : IDisposable
         });
 
         // Because above tasks are running async the Download method will return immediatly.
+    }
+
+    private async Task<(List<Chunk>, Int64)> CalculateChunks(CancellationToken cancellationToken)
+    {
+        // Fetch the content size from the URL, if the content size cannot be fetched,
+        // we can only download with a single chunk.
+        var fileInfo = await GetFileInfo(cancellationToken);
+
+        if (!fileInfo.AcceptRangesBytes)
+        {
+            return ([
+                new Chunk
+                {
+                    StartByte = 0,
+                    EndByte = fileInfo.ContentLength - 1,
+                    LengthBytes = fileInfo.ContentLength
+                }
+            ], fileInfo.ContentLength);
+        }
+
+        var contentSize = fileInfo.ContentLength;
+
+        if (_settings.ChunkSize == 0)
+        {
+            if (contentSize <= 1024 * 1024 * 10)
+            {
+                _settings.ChunkSize = 1024 * 1024 * 10;
+            }
+            else if (contentSize <= 1024 * 1024 * 100)
+            {
+                _settings.ChunkSize = 1024 * 1024 * 25;
+            }
+            else
+            {
+                _settings.ChunkSize = 1024 * 1024 * 50;
+            }
+
+            Log($"Setting chunk size to {_settings.ChunkSize}", -1);
+        }
+
+        if (_settings.ChunkSize < _settings.BufferSize)
+        {
+            _settings.ChunkSize = _settings.BufferSize;
+        }
+
+        if (contentSize == -1)
+        {
+            Log($"Force setting parallel to 1", -1);
+
+            _settings.Parallel = 1;
+        }
+        else if (_settings.ChunkSize > contentSize)
+        {
+            Log($"Force setting chunk size to ${contentSize}", -1);
+
+            _settings.ChunkSize = (Int32)contentSize;
+            _settings.Parallel = 1;
+        }
+
+        Log($"Calculating chunks", -1);
+
+        var chunks = new List<Chunk>();
+
+        for (var startByte = 0L; startByte < contentSize; startByte += _settings.ChunkSize)
+        {
+            var endByte = Math.Min(startByte + _settings.ChunkSize, contentSize - 1);
+            var length = endByte - startByte;
+
+            Log($"Add chunk {startByte} - {endByte} ({length})", -1);
+
+            chunks.Add(new Chunk
+            {
+                StartByte = startByte,
+                EndByte = endByte,
+                LengthBytes = length
+            });
+        }
+
+        Log($"Chunks: {chunks.Count}", -1);
+
+        return (chunks, fileInfo.ContentLength);
     }
 
     /// <summary>
@@ -564,26 +585,37 @@ public class Downloader : IDisposable
     /// </summary>
     /// <returns>The content size in bytes. Will return -1 if the server does not support getting the content size.</returns>
     /// <exception cref="Exception"></exception>
-    private async Task<Int64> GetContentSize(CancellationToken cancellationToken)
+    private async Task<FileInfo> GetFileInfo(CancellationToken cancellationToken)
     {
-        Log($"GetContentSize start", -1);
-        var responseHeaders = await _httpClient.SendAsync(new HttpRequestMessage(HttpMethod.Head, _uri), cancellationToken);
+        Log($"GetFileInfo start", -1);
+        var response = await _httpClient.SendAsync(new HttpRequestMessage(HttpMethod.Head, _uri), cancellationToken);
 
-        if (!responseHeaders.IsSuccessStatusCode)
+        if (!response.IsSuccessStatusCode)
         {
-            var content = await responseHeaders.Content.ReadAsStringAsync();
-            var ex = new Exception($"Unable to retrieve content size before downloading, received response: {responseHeaders.StatusCode} {content}");
+            var content = await response.Content.ReadAsStringAsync();
+            var ex = new Exception($"Unable to retrieve content size before downloading, received response: {response.StatusCode} {content}");
             Log(ex, -1);
 
             throw ex;
         }
 
-        var result = responseHeaders.Content.Headers.ContentLength ?? -1;
-        Log($"Content size {result}", -1, 1);
+        var contentLength = response.Content.Headers.ContentLength ?? -1;
+        Log($"Content size {contentLength}", -1, 1);
 
-        Log($"GetContentSize end", -1);
+        var acceptRangesBytes = response.Headers.AcceptRanges.Contains("bytes");
 
-        return result;
+        if (acceptRangesBytes)
+        {
+            Log($"Server supports byte ranges", -1, 1);
+        }
+        else
+        {
+            Log($"Server does not support byte ranges", -1, 1);
+        }
+
+        Log($"GetFileInfo end", -1);
+
+        return new FileInfo(contentLength, acceptRangesBytes);
     }
 
     private void Log(String message, Int64 chunk, Int32 logLevel = 0)
@@ -591,10 +623,11 @@ public class Downloader : IDisposable
         if (_settings == null || logLevel >= _settings.LogLevel)
         {
             OnLog?.Invoke(new LogMessage
-            {
-                Message = message,
-                Thread = chunk
-            }, logLevel);
+                          {
+                              Message = message,
+                              Thread = chunk
+                          },
+                          logLevel);
         }
     }
 
@@ -603,11 +636,12 @@ public class Downloader : IDisposable
         if (_settings == null || _settings.LogLevel >= 4)
         {
             OnLog?.Invoke(new LogMessage
-            {
-                Message = ex.Message,
-                Thread = chunk,
-                Exception = ex
-            }, 4);
+                          {
+                              Message = ex.Message,
+                              Thread = chunk,
+                              Exception = ex
+                          },
+                          4);
         }
     }
 
@@ -628,5 +662,11 @@ public class Downloader : IDisposable
         public Int64 Position { get; }
         public Int32 Length { get; }
         public Byte[] Buffer { get; }
+    }
+
+    private class FileInfo(Int64 contentLength, Boolean acceptRangesBytes)
+    {
+        public readonly Int64 ContentLength = contentLength;
+        public readonly Boolean AcceptRangesBytes = acceptRangesBytes;
     }
 }
