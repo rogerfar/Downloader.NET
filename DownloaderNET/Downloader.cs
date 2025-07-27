@@ -329,9 +329,13 @@ public class Downloader : IDisposable
             {
                 _settings.ChunkSize = 1024 * 1024 * 100;
             }
-            else
+            else if (contentSize <= 1024 * 1024 * 1024 * 4)
             {
                 _settings.ChunkSize = 1024 * 1024 * 250;
+            }
+            else
+            {
+                _settings.ChunkSize = 1024 * 1024 * 750;
             }
 
             Log($"Setting chunk size to {_settings.ChunkSize}", -1);
