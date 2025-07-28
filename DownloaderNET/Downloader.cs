@@ -312,17 +312,30 @@ public class Downloader : IDisposable
 
         if (_settings.ChunkSize == 0)
         {
-            if (contentSize <= 1024 * 1024 * 10)
+            // With high downstream speed, if chunk size is too small we can download each chunk
+            // super quick even before speed is calculated for the first time. Resulting in
+            // speed being reported as 0 B/s throughout the download.
+            //
+            // This only matters when file itself is big enough for user to actually notice the 0 B/s.
+            if (contentSize <= 1024 * 1024 * 50)
             {
                 _settings.ChunkSize = 1024 * 1024 * 10;
             }
-            else if (contentSize <= 1024 * 1024 * 100)
+            else if (contentSize <= 1024 * 1024 * 500)
             {
                 _settings.ChunkSize = 1024 * 1024 * 25;
             }
+            else if (contentSize <= 1024 * 1024 * 1024)
+            {
+                _settings.ChunkSize = 1024 * 1024 * 100;
+            }
+            else if (contentSize <= 1024 * 1024 * 1024 * 4)
+            {
+                _settings.ChunkSize = 1024 * 1024 * 250;
+            }
             else
             {
-                _settings.ChunkSize = 1024 * 1024 * 50;
+                _settings.ChunkSize = 1024 * 1024 * 750;
             }
 
             Log($"Setting chunk size to {_settings.ChunkSize}", -1);
